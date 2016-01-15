@@ -58,6 +58,7 @@
 #include <fc/thread/scoped_lock.hpp>
 
 #include <graphene/app/api.hpp>
+#include <graphene/chain/hardfork.hpp>
 #include <graphene/chain/asset_object.hpp>
 #include <graphene/chain/protocol/fee_schedule.hpp>
 #include <graphene/utilities/git_revision.hpp>
@@ -114,6 +115,7 @@ public:
    std::string operator()(const T& op)const;
 
    std::string operator()(const transfer_operation& op)const;
+   std::string operator()(const transfer_v2_operation& op)const;
    std::string operator()(const transfer_from_blind_operation& op)const;
    std::string operator()(const transfer_to_blind_operation& op)const;
    std::string operator()(const account_create_operation& op)const;
@@ -491,7 +493,17 @@ public:
    void set_operation_fees( signed_transaction& tx, const fee_schedule& s  )
    {
       for( auto& op : tx.operations )
-         s.set_fee(op);
+      {
+         if( op.which() == operation::tag<transfer_v2_operation>::value )
+         {
+            s.set_fee( op, get_asset( op.get<transfer_v2_operation>().amount.asset_id ) );
+         }
+         else if( op.which() == operation::tag<transfer_operation>::value )
+         {
+            s.set_fee( op, get_asset( op.get<transfer_operation>().amount.asset_id ) );
+         }
+         else s.set_fee(op);
+      }
    }
 
    variant info() const
@@ -838,7 +850,24 @@ public:
       if( fee_asset_obj.get_id() != asset_id_type() )
       {
          for( auto& op : _builder_transactions[handle].operations )
-            total_fee += gprops.current_fees->set_fee( op, fee_asset_obj.options.core_exchange_rate );
+         {
+            if( op.which() == operation::tag<transfer_v2_operation>::value )
+            {
+               total_fee += gprops.current_fees->set_fee( op,
+                               get_asset( op.get<transfer_v2_operation>().amount.asset_id ),
+                               fee_asset_obj.options.core_exchange_rate );
+            }
+            else if( op.which() == operation::tag<transfer_operation>::value )
+            {
+               total_fee += gprops.current_fees->set_fee( op,
+                               get_asset( op.get<transfer_operation>().amount.asset_id ),
+                               fee_asset_obj.options.core_exchange_rate );
+            }
+            else
+            {
+               total_fee += gprops.current_fees->set_fee( op, fee_asset_obj.options.core_exchange_rate );
+            }
+         }
 
          FC_ASSERT((total_fee * fee_asset_obj.options.core_exchange_rate).amount <=
                    get_object<asset_dynamic_data_object>(fee_asset_obj.dynamic_asset_data_id).fee_pool,
@@ -846,7 +875,22 @@ public:
                    ("asset", fee_asset_obj.symbol));
       } else {
          for( auto& op : _builder_transactions[handle].operations )
-            total_fee += gprops.current_fees->set_fee( op );
+         {
+            if( op.which() == operation::tag<transfer_v2_operation>::value )
+            {
+               total_fee += gprops.current_fees->set_fee( op,
+                               get_asset( op.get<transfer_v2_operation>().amount.asset_id ) );
+            }
+            else if( op.which() == operation::tag<transfer_operation>::value )
+            {
+               total_fee += gprops.current_fees->set_fee( op,
+                               get_asset( op.get<transfer_operation>().amount.asset_id ) );
+            }
+            else
+            {
+               total_fee += gprops.current_fees->set_fee( op );
+            }
+         }
       }
 
       return total_fee;
@@ -2001,13 +2045,14 @@ public:
       account_id_type from_id = from_account.id;
       account_id_type to_id = get_account_id(to);
 
-      transfer_operation xfer_op;
+      if( time_point_sec(time_point::now()) <= HARDFORK_BSIP10_TIME )
+      {
+         transfer_operation xfer_op;
+         xfer_op.from = from_id;
+         xfer_op.to = to_id;
+         xfer_op.amount = asset_obj->amount_from_string(amount);
 
-      xfer_op.from = from_id;
-      xfer_op.to = to_id;
-      xfer_op.amount = asset_obj->amount_from_string(amount);
-
-      if( memo.size() )
+         if( memo.size() )
          {
             xfer_op.memo = memo_data();
             xfer_op.memo->from = from_account.options.memo_key;
@@ -2016,12 +2061,36 @@ public:
                                       to_account.options.memo_key, memo);
          }
 
-      signed_transaction tx;
-      tx.operations.push_back(xfer_op);
-      set_operation_fees( tx, _remote_db->get_global_properties().parameters.current_fees);
-      tx.validate();
+         signed_transaction tx;
+         tx.operations.push_back(xfer_op);
+         set_operation_fees( tx, _remote_db->get_global_properties().parameters.current_fees);
+         tx.validate();
 
-      return sign_transaction(tx, broadcast);
+         return sign_transaction(tx, broadcast);
+      }
+      else
+      {
+         transfer_v2_operation xfer_op;
+         xfer_op.from = from_id;
+         xfer_op.to = to_id;
+         xfer_op.amount = asset_obj->amount_from_string(amount);
+
+         if( memo.size() )
+         {
+            xfer_op.memo = memo_data();
+            xfer_op.memo->from = from_account.options.memo_key;
+            xfer_op.memo->to = to_account.options.memo_key;
+            xfer_op.memo->set_message(get_private_key(from_account.options.memo_key),
+                                      to_account.options.memo_key, memo);
+         }
+
+         signed_transaction tx;
+         tx.operations.push_back(xfer_op);
+         set_operation_fees( tx, _remote_db->get_global_properties().parameters.current_fees);
+         tx.validate();
+
+         return sign_transaction(tx, broadcast);
+      }
    } FC_CAPTURE_AND_RETHROW( (from)(to)(amount)(asset_symbol)(memo)(broadcast) ) }
 
    signed_transaction issue_asset(string to_account, string amount, string symbol,
@@ -2507,6 +2576,34 @@ std::string operation_printer::operator()(const transfer_to_blind_operation& op)
    return "";
 }
 string operation_printer::operator()(const transfer_operation& op) const
+{
+   out << "Transfer " << wallet.get_asset(op.amount.asset_id).amount_to_pretty_string(op.amount)
+       << " from " << wallet.get_account(op.from).name << " to " << wallet.get_account(op.to).name;
+   std::string memo;
+   if( op.memo )
+   {
+      if( wallet.is_locked() )
+      {
+         out << " -- Unlock wallet to see memo.";
+      } else {
+         try {
+            FC_ASSERT(wallet._keys.count(op.memo->to), "Memo is encrypted to a key ${k} not in this wallet.",
+                      ("k", op.memo->to));
+            auto my_key = wif_to_key(wallet._keys.at(op.memo->to));
+            FC_ASSERT(my_key, "Unable to recover private key to decrypt memo. Wallet may be corrupted.");
+            memo = op.memo->get_message(*my_key, op.memo->from);
+            out << " -- Memo: " << memo;
+         } catch (const fc::exception& e) {
+            out << " -- could not decrypt memo";
+            elog("Error when decrypting memo: ${e}", ("e", e.to_detail_string()));
+         }
+      }
+   }
+   fee(op.fee);
+   return memo;
+}
+
+string operation_printer::operator()(const transfer_v2_operation& op) const
 {
    out << "Transfer " << wallet.get_asset(op.amount.asset_id).amount_to_pretty_string(op.amount)
        << " from " << wallet.get_account(op.from).name << " to " << wallet.get_account(op.to).name;

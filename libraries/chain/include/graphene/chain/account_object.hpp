@@ -74,14 +74,34 @@ namespace graphene { namespace chain {
           * available for withdrawal) rather than requiring the normal vesting period.
           */
          share_type pending_vested_fees;
+         /**
+          * Tracks the fees paid by this account which will be disseminated to network. See also @ref pending_fees
+          */
+         share_type pending_fees_to_network;
+         /**
+          * Tracks the fees paid by this account which will be disseminated to non-network parties.
+          * See also @ref pending_fees
+          */
+         share_type pending_fees_to_non_network;
+         /**
+          * Same as @ref pending_fees_to_non_network, except these fees will be paid out as pre-vested cash-back
+          * (immediately available for withdrawal) rather than requiring the normal vesting period.
+          */
+         share_type pending_vested_fees_to_non_network;
 
-         /// @brief Split up and pay out @ref pending_fees and @ref pending_vested_fees
+         /// @brief Split up and pay out @ref pending_fees and @ref pending_vested_fees and etc.
          void process_fees(const account_object& a, database& d) const;
 
          /**
           * Core fees are paid into the account_statistics_object by this method
           */
          void pay_fee( share_type core_fee, share_type cashback_vesting_threshold );
+
+         /**
+          * Core fees which will split a fixed amount to network are paid into the account_statistics_object
+          * by this method
+          */
+         void pay_fee_pre_split_network( share_type core_fee, share_type cashback_vesting_threshold, share_type network_fee );
    };
 
    /**
@@ -336,7 +356,7 @@ FC_REFLECT_DERIVED( graphene::chain::account_object,
                     (membership_expiration_date)(registrar)(referrer)(lifetime_referrer)
                     (network_fee_percentage)(lifetime_referrer_fee_percentage)(referrer_rewards_percentage)
                     (name)(owner)(active)(options)(statistics)(whitelisting_accounts)(blacklisting_accounts)
-                    (whitelisting_accounts)(blacklisted_accounts)
+                    (whitelisted_accounts)(blacklisted_accounts)
                     (cashback_vb) )
 
 FC_REFLECT_DERIVED( graphene::chain::account_balance_object,
@@ -350,5 +370,6 @@ FC_REFLECT_DERIVED( graphene::chain::account_statistics_object,
                     (total_core_in_orders)
                     (lifetime_fees_paid)
                     (pending_fees)(pending_vested_fees)
+                    (pending_fees_to_network)(pending_fees_to_non_network)(pending_vested_fees_to_non_network)
                   )
 

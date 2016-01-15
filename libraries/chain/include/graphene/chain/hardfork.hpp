@@ -36,3 +36,7 @@
 
 // #453 Hardfork to retroactively correct referral percentages
 #define HARDFORK_453_TIME (fc::time_point_sec( 1450288800 ))
+
+// BSIP#10 Percentage based transfer fee
+// TODO hard fork time need to be re-scheduled
+#define HARDFORK_BSIP10_TIME (fc::time_point_sec( 1455876427 ))

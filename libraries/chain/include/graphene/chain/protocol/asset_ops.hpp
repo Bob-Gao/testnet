@@ -72,6 +72,34 @@ namespace graphene { namespace chain {
        * size of description.
        */
       string description;
+
+      /**
+       * struct for override extensions
+       */
+      struct ext
+      {
+         /** container of transfer fee mode */
+         struct transfer_fee_mode_options
+         {
+             /**
+              * transfer fee mode, would be:
+              * * flat fee mode
+              * * simple CER based percentage fee mode
+              */
+             asset_transfer_fee_mode transfer_fee_mode = GRAPHENE_DEFAULT_TRANSFER_FEE_MODE;
+         };
+      };
+
+      /**
+       * override future_extensions here
+       */
+      typedef static_variant<void_t, ext::transfer_fee_mode_options> future_extensions;
+
+      /**
+       * override extensions_type here
+       */
+      typedef flat_set<future_extensions> extensions_type;
+
       extensions_type extensions;
 
       /// Perform internal consistency checks.
@@ -443,6 +471,9 @@ namespace graphene { namespace chain {
 FC_REFLECT( graphene::chain::asset_claim_fees_operation, (fee)(issuer)(amount_to_claim)(extensions) )
 FC_REFLECT( graphene::chain::asset_claim_fees_operation::fee_parameters_type, (fee) )
 
+FC_REFLECT( graphene::chain::asset_options::ext::transfer_fee_mode_options, (transfer_fee_mode) )
+FC_REFLECT_TYPENAME( graphene::chain::asset_options::future_extensions )
+FC_REFLECT_TYPENAME( graphene::chain::asset_options::extensions_type )
 FC_REFLECT( graphene::chain::asset_options,
             (max_supply)
             (market_fee_percent)
